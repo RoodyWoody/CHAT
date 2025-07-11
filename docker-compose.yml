@@ -1,0 +1,55 @@
+services:
+
+  postgres:
+    image: postgres:latest
+    container_name: postgres_container
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres_user
+      POSTGRES_PASSWORD: postgres_password
+      POSTGRES_DB: postgres_db
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5430:5432"
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data/pgdata
+    tty: true
+    stdin_open: true
+  
+  boost:
+    image: boost:1.88.0
+    container_name: boost_container
+    restart: unless-stopped
+    build:
+      context: ./boost
+      dockerfile: boost.Dockerfile
+    hostname: host
+    ports:
+      - "8080:8080"
+    tty: true
+  
+  app:
+    image: app:1.0
+    container_name: app_container
+    build:
+      context: ./app
+      dockerfile: app.Dockerfile
+    depends_on:
+      - postgres
+      - boost
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres_user
+      DB_PASSWORD: postgres_password
+      DB_NAME: postgres_db
+    ports:
+      - "8081:8081" 
+    volumes:
+      - ./appdata:/app/data
+
+
+
+volumes:
+  pgdata:
+    driver: local
