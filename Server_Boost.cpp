@@ -1,15 +1,23 @@
 #include <boost/asio.hpp>
 #include <iostream>
 #include <vector>
+#include <string>
 #include <thread>
 #include <mutex>
 
 using boost::asio::ip::tcp;
 
-std::vector<tcp::socket*> clients;
+struct Client
+{
+    std::string username;
+    tcp::socket socket;
+
+    Client(boost::asio::io_context& io) : socket(io) {};
+};
+
+std::vector<Client*> clients;
 std::mutex clientsMutex;
 
-// Функция отправки пакета (length + message)
 bool SendPacket(tcp::socket& socket, const std::string& data) {
     try {
         uint32_t length = htonl(static_cast<uint32_t>(data.size()));
@@ -40,51 +48,71 @@ bool ReceivePacket(tcp::socket& socket, std::string& outData) {
     }
 }
 
-void HandleClient(tcp::socket socket) {
+void HandleClient(Client* client) {
     try {
-        std::string username = "Anonymous";
-
-        // Получаем имя клиента
         std::string message;
-        if (!ReceivePacket(socket, message)) {
-            std::cout << "Client disconnected before sending username." << std::endl;
+        if (!ReceivePacket(client->socket, message)) {
+            std::cerr << "Failed register client" << std::endl;
+            delete client;
             return;
         }
 
         if (message.find("USERNAME:") == 0) {
-            username = message.substr(9); // Извлечение имени
-            std::cout << "New client connected: " << username << std::endl;
+            client->username = message.substr(9); // Извлечение имени
+            std::cout << "New client connected: " << client->username << std::endl;
         } else {
             std::cerr << "Invalid username message." << std::endl;
+            delete client;
+            return;
         }
 
         // Добавляем клиента в список
         {
             std::lock_guard<std::mutex> lock(clientsMutex);
-            clients.push_back(&socket);
+            clients.push_back(client);
         }
 
         while (true) {
-            if (!ReceivePacket(socket, message)) {
-                std::cout << username << " disconnected." << std::endl;
+            if (!ReceivePacket(client->socket, message)) {
+                std::cout << client->username << " disconnected." << std::endl;
                 {
                     std::lock_guard<std::mutex> lock(clientsMutex);
-                    auto it = std::find(clients.begin(), clients.end(), &socket);
+                    auto it = std::find(clients.begin(), clients.end(), client);
                     if (it != clients.end()) {
                         clients.erase(it);
                     }
                 }
+                delete client;
                 return;
             }
 
-            std::cout << username << " sent: " << message << std::endl;
-
-            std::string fullMessage = username + ": " + message;
+            if(message == "/list")
             {
+                std::string userList = "======= USERLIST ========\n";
+                u_int8_t count = 0; 
                 std::lock_guard<std::mutex> lock(clientsMutex);
-                for (auto client : clients) {
-                    if (client != &socket) {
-                        SendPacket(*client, fullMessage); // Отправка через SendPacket
+                for (auto c : clients)
+                {
+                    count++;
+                    tcp::endpoint endpoint = c->socket.remote_endpoint();
+                    std::string ip = endpoint.address().to_string();
+                    unsigned short port = endpoint.port();
+                    userList += std::to_string(count) + " : \t" + c->username + " (" + ip + ":" + std::to_string(port) + ")\n";
+                    
+                }
+                SendPacket(client->socket, userList);
+            }
+            else
+            {
+                std::cout << client->username << " sent: " << message << std::endl;
+
+                std::string fullMessage = client->username + ": " + message;
+                {
+                    std::lock_guard<std::mutex> lock(clientsMutex);
+                    for (auto с : clients) {
+                        if (с != client) {
+                            SendPacket(с->socket, fullMessage); // Отправка через SendPacket
+                        }
                     }
                 }
             }
@@ -106,7 +134,9 @@ int main() {
             tcp::socket socket(io_context);
             acceptor.accept(socket);
 
-            std::thread(HandleClient, std::move(socket)).detach();
+            Client* client = new Client(io_context);
+            client->socket = std::move(socket);
+            std::thread(HandleClient, client).detach();
         }
     }
     catch (const std::exception& ex) {

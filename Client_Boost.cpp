@@ -9,6 +9,8 @@ using boost::asio::ip::tcp;
 std::mutex socketMutex;
 tcp::socket* clientSocket = nullptr;
 
+
+
 // Функция отправки пакета
 bool SendPacket(tcp::socket& socket, const std::string& data) {
     try {
