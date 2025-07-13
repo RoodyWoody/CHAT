@@ -4,15 +4,98 @@
 #include <string>
 #include <thread>
 #include <mutex>
+#include <sstream>
+#include <cmath>
+#include <stdexcept>
+#include <chrono>
+#include <iomanip>
 
 using boost::asio::ip::tcp;
 
-struct Client
-{
+// -------------------------------
+// Функции логирования
+// -------------------------------
+
+std::string GetCurrentTime() {
+    auto now = std::chrono::system_clock::now();
+    auto in_time_t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm = *std::localtime(&in_time_t);
+    std::ostringstream oss;
+    oss << std::put_time(&tm, "%H:%M:%S");
+    return oss.str();
+}
+
+void Log(const std::string& message) {
+    std::string time = GetCurrentTime();
+    std::cout << "[" << time << "] " << message << std::endl;
+}
+
+void LogError(const std::string& message) {
+    std::string time = GetCurrentTime();
+    std::cerr << "[" << time << "] ERROR: " << message << std::endl;
+}
+
+// -------------------------------
+// RSA-реализация
+// -------------------------------
+
+unsigned long long mod_exp(unsigned long long base, unsigned long long exp, unsigned long long mod) {
+    unsigned long long result = 1;
+    base = base % mod;
+    while (exp > 0) {
+        if (exp % 2 == 1) result = (result * base) % mod;
+        exp /= 2;
+        base = (base * base) % mod;
+    }
+    return result;
+}
+
+std::vector<unsigned long long> parse_numbers(const std::string& str) {
+    std::vector<unsigned long long> result;
+    std::stringstream ss(str);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        result.push_back(std::stoull(item));
+    }
+    return result;
+}
+
+std::string vector_to_string(const std::vector<unsigned long long>& vec) {
+    std::ostringstream oss;
+    for (size_t i = 0; i < vec.size(); ++i) {
+        oss << vec[i];
+        if (i != vec.size() - 1) oss << ",";
+    }
+    return oss.str();
+}
+
+std::vector<unsigned long long> encrypt_string(const std::string& message, unsigned long long e, unsigned long long n) {
+    std::vector<unsigned long long> encrypted;
+    for (char c : message) {
+        encrypted.push_back(mod_exp(static_cast<unsigned long long>(c), e, n));
+    }
+    return encrypted;
+}
+
+std::string decrypt_string(const std::vector<unsigned long long>& encrypted, unsigned long long d, unsigned long long n) {
+    std::string decrypted;
+    for (unsigned long long c : encrypted) {
+        decrypted += static_cast<char>(mod_exp(c, d, n));
+    }
+    return decrypted;
+}
+
+// -------------------------------
+// Клиент и сервер
+// -------------------------------
+
+struct Client {
     std::string username;
     tcp::socket socket;
+    unsigned long long e;
+    unsigned long long n;
 
-    Client(boost::asio::io_context& io) : socket(io) {};
+    Client(boost::asio::io_context& io) : socket(io), e(0), n(0) {}
 };
 
 std::vector<Client*> clients;
@@ -24,14 +107,12 @@ bool SendPacket(tcp::socket& socket, const std::string& data) {
         boost::asio::write(socket, boost::asio::buffer(&length, sizeof(length)));
         boost::asio::write(socket, boost::asio::buffer(data));
         return true;
-    }
-    catch (const std::exception& ex) {
-        std::cerr << "SendPacket error: " << ex.what() << std::endl;
+    } catch (const std::exception& ex) {
+        LogError(std::string("SendPacket error: ") + ex.what());
         return false;
     }
 }
 
-// Функция получения пакета (length + message)
 bool ReceivePacket(tcp::socket& socket, std::string& outData) {
     try {
         uint32_t length;
@@ -41,9 +122,8 @@ bool ReceivePacket(tcp::socket& socket, std::string& outData) {
         outData.resize(length);
         boost::asio::read(socket, boost::asio::buffer(outData.data(), length));
         return true;
-    }
-    catch (const std::exception& ex) {
-        std::cerr << "ReceivePacket error: " << ex.what() << std::endl;
+    } catch (const std::exception& ex) {
+        LogError(std::string("ReceivePacket error: ") + ex.what());
         return false;
     }
 }
@@ -51,30 +131,50 @@ bool ReceivePacket(tcp::socket& socket, std::string& outData) {
 void HandleClient(Client* client) {
     try {
         std::string message;
+
+        // Получаем имя клиента
         if (!ReceivePacket(client->socket, message)) {
-            std::cerr << "Failed register client" << std::endl;
+            LogError("Failed to receive username.");
             delete client;
             return;
         }
 
         if (message.find("USERNAME:") == 0) {
-            client->username = message.substr(9); // Извлечение имени
-            std::cout << "New client connected: " << client->username << std::endl;
+            client->username = message.substr(9);
+            tcp::endpoint endpoint = client->socket.remote_endpoint();
+            std::string ip = endpoint.address().to_string();
+            unsigned short port = endpoint.port();
+
+            Log("New client connected: " + client->username + " (" + ip + ":" + std::to_string(port) + ")");
         } else {
-            std::cerr << "Invalid username message." << std::endl;
+            LogError("Invalid username message from client.");
             delete client;
             return;
         }
 
-        // Добавляем клиента в список
+        // Получаем публичный ключ клиента
+        if (!ReceivePacket(client->socket, message)) {
+            LogError("Failed to receive public key.");
+            delete client;
+            return;
+        }
+
+        if (message.find("PUBKEY:") == 0) {
+            auto parts = parse_numbers(message.substr(7));
+            client->e = parts[0];
+            client->n = parts[1];
+            Log(client->username + " public key registered: e=" + std::to_string(client->e) + ", n=" + std::to_string(client->n));
+        }
+
         {
             std::lock_guard<std::mutex> lock(clientsMutex);
             clients.push_back(client);
         }
 
         while (true) {
-            if (!ReceivePacket(client->socket, message)) {
-                std::cout << client->username << " disconnected." << std::endl;
+            std::string packet;
+            if (!ReceivePacket(client->socket, packet)) {
+                Log(client->username + " disconnected.");
                 {
                     std::lock_guard<std::mutex> lock(clientsMutex);
                     auto it = std::find(clients.begin(), clients.end(), client);
@@ -86,49 +186,63 @@ void HandleClient(Client* client) {
                 return;
             }
 
-            if(message == "/list")
-            {
-                std::string userList = "======= USERLIST ========\n";
-                u_int8_t count = 0; 
+            if (packet.find("GETKEY:") == 0) {
+                std::string target = packet.substr(7);
                 std::lock_guard<std::mutex> lock(clientsMutex);
-                for (auto c : clients)
-                {
-                    count++;
+                for (auto c : clients) {
+                    if (c->username == target) {
+                        std::string key = "PUBKEY:" + std::to_string(c->e) + "," + std::to_string(c->n);
+                        SendPacket(client->socket, key);
+                        break;
+                    }
+                }
+            } else if (packet.find("MSG:") == 0) {
+                size_t colonPos = packet.find(':', 4);
+                if (colonPos == std::string::npos) continue;
+
+                std::string target = packet.substr(4, colonPos - 4);
+                std::string encryptedData = packet.substr(colonPos + 1);
+
+                std::lock_guard<std::mutex> lock(clientsMutex);
+                for (auto c : clients) {
+                    if (c->username == target) {
+                        SendPacket(c->socket, encryptedData);
+                        break;
+                    }
+                }
+            } else if (packet == "LIST:") {
+                std::string userList = "======= USERLIST ========\n";
+                std::lock_guard<std::mutex> lock(clientsMutex);
+                int index = 1;
+                for (auto c : clients) {
                     tcp::endpoint endpoint = c->socket.remote_endpoint();
                     std::string ip = endpoint.address().to_string();
                     unsigned short port = endpoint.port();
-                    userList += std::to_string(count) + " : \t" + c->username + " (" + ip + ":" + std::to_string(port) + ")\n";
-                    
+                    userList += std::to_string(index++) + " : \t" + c->username + " (" + ip + ":" + std::to_string(port) + ")\n";
                 }
-                SendPacket(client->socket, userList);
-            }
-            else
-            {
-                std::cout << client->username << " sent: " << message << std::endl;
+                SendPacket(client->socket, "LIST:" + userList);
+            } else if (packet.find("BROADCAST:") == 0) {
+                std::string encryptedData = packet.substr(10);
 
-                std::string fullMessage = client->username + ": " + message;
-                {
-                    std::lock_guard<std::mutex> lock(clientsMutex);
-                    for (auto с : clients) {
-                        if (с != client) {
-                            SendPacket(с->socket, fullMessage); // Отправка через SendPacket
-                        }
+                std::lock_guard<std::mutex> lock(clientsMutex);
+                for (auto c : clients) {
+                    if (c->socket.is_open()) {
+                        SendPacket(c->socket, encryptedData);
                     }
                 }
             }
         }
-    }
-    catch (const std::exception& ex) {
-        std::cerr << "Connection error: " << ex.what() << std::endl;
+    } catch (const std::exception& ex) {
+        LogError(std::string("Connection error: ") + ex.what());
     }
 }
 
 int main() {
     try {
         boost::asio::io_context io_context;
-
         tcp::acceptor acceptor(io_context, tcp::endpoint(tcp::v4(), 12345));
-        std::cout << "Server started. Waiting for connections..." << std::endl;
+
+        Log("Server started. Waiting for connections...");
 
         while (true) {
             tcp::socket socket(io_context);
@@ -138,9 +252,8 @@ int main() {
             client->socket = std::move(socket);
             std::thread(HandleClient, client).detach();
         }
-    }
-    catch (const std::exception& ex) {
-        std::cerr << "Server error: " << ex.what() << std::endl;
+    } catch (const std::exception& ex) {
+        LogError(std::string("Server error: ") + ex.what());
     }
 
     return 0;
