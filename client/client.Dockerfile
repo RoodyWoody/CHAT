@@ -10,4 +10,4 @@ RUN g++ -std=c++17 Client_Boost.cpp -o client \
     -lboost_system -lpthread
     #-lboost_system -lboost_filesystem -lboost_thread -lpthread
 
-CMD ["./client"]
+ENTRYPOINT ["./client"]

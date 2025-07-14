@@ -53,7 +53,7 @@ void ReceiveMessages(tcp::socket& socket) {
 bool ConnectToServer(boost::asio::io_context& io, tcp::socket& socket) {
     try {
         tcp::resolver resolver(io);
-        auto endpoints = resolver.resolve("127.0.0.1", "12345");
+        auto endpoints = resolver.resolve("server", "12345");
         boost::asio::connect(socket, endpoints);
         return true;
     }

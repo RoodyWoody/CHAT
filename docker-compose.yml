@@ -28,24 +28,9 @@ services:
       - "8080:8080"
     tty: true
   
-  client:
-    image: client:1.0
-    container_name: client_container
-    restart: unless-stopped
-    build:
-      context: ./client
-      dockerfile: client.Dockerfile
-    depends_on:
-      - boost
-    ports:
-      - "0:12345" 
-    volumes:
-      - ./client:/client/data
-    
   server:
     image: server:1.0
     container_name: server_container
-    restart: unless-stopped
     build:
       context: ./server
       dockerfile: server.Dockerfile
@@ -59,10 +44,24 @@ services:
       DB_PASSWORD: postgres_password
       DB_NAME: postgres_db
     ports:
-      - "0:12345" 
+      - "12340:12345" 
     volumes:
       - ./server:/server/data
 
+  client:
+    image: client:1.0
+    container_name: client_container
+    build:
+      context: ./client
+      dockerfile: client.Dockerfile
+    depends_on:
+      - boost
+    ports:
+      - "12341:12345"
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./client:/client/data
 
 
 volumes:
