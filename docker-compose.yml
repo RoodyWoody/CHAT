@@ -1,18 +1,20 @@
 services:
 
   postgres:
-    image: postgres:latest
+    image: postgres:17.5
     container_name: postgres_container
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres_user
-      POSTGRES_PASSWORD: postgres_password
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
       POSTGRES_DB: postgres_db
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
       - "5430:5432"
     volumes:
       - ./pgdata:/var/lib/postgresql/data/pgdata
+      - ./initdb:/docker-entrypoint-initdb.d
+      - ./backups:/backups
     tty: true
     stdin_open: true
   
@@ -37,12 +39,6 @@ services:
     depends_on:
       - postgres
       - boost
-    environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_USER: postgres_user
-      DB_PASSWORD: postgres_password
-      DB_NAME: postgres_db
     ports:
       - "12340:12345" 
     volumes:
@@ -66,4 +62,6 @@ services:
 
 volumes:
   pgdata:
+    driver: local
+  backups:
     driver: local
