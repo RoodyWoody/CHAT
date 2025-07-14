@@ -205,7 +205,7 @@ void HandleClient(Client* client) {
 
                 std::lock_guard<std::mutex> lock(clientsMutex);
                 for (auto c : clients) {
-                    if (c->username == target) {
+                    if (c->username == target && c->socket.is_open()) {
                         SendPacket(c->socket, encryptedData);
                         break;
                     }
@@ -221,13 +221,16 @@ void HandleClient(Client* client) {
                     userList += std::to_string(index++) + " : \t" + c->username + " (" + ip + ":" + std::to_string(port) + ")\n";
                 }
                 SendPacket(client->socket, "LIST:" + userList);
-            } else if (packet.find("BROADCAST:") == 0) {
-                std::string encryptedData = packet.substr(10);
+            } else if (packet.find("MSGALL:") == 0) {
+                size_t firstColon = packet.find(':', 7); // MSGALL:username:...
+                if (firstColon == std::string::npos) continue;
+
+                std::string senderUsername = packet.substr(7, firstColon - 7);
 
                 std::lock_guard<std::mutex> lock(clientsMutex);
                 for (auto c : clients) {
-                    if (c->socket.is_open()) {
-                        SendPacket(c->socket, encryptedData);
+                    if (c->socket.is_open() && c->username != senderUsername) {
+                        SendPacket(c->socket, "MSGALL:" + packet.substr(7)); // Перешлем дальше
                     }
                 }
             }

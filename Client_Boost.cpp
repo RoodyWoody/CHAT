@@ -130,9 +130,10 @@ bool ConnectToServer(boost::asio::io_context& io, tcp::socket& socket) {
 void showHelp() {
     std::cout << "Available commands:\n";
     std::cout << "  /whisp <name> <message>   - Send encrypted message to specific user\n";
-    std::cout << "  /broadcast <message>      - Send encrypted message to all users\n";
-    std::cout << "  /list                     - Show connected users\n";
-    std::cout << "  /help                     - Show this help\n";
+    std::cout << "  /all <message>             - Send encrypted message to all users\n";
+    std::cout << "  /list                      - Show connected users\n";
+    std::cout << "  /help                      - Show this help\n";
+    std::cout << "  <message>                  - Same as /all\n";
 }
 
 void ReceiveMessages(tcp::socket& socket, unsigned long long d, unsigned long long n) {
@@ -143,13 +144,18 @@ void ReceiveMessages(tcp::socket& socket, unsigned long long d, unsigned long lo
             break;
         }
 
-        if (packet.find("LIST:") == 0) {
-            std::cout << packet.substr(5) << std::endl;
-        } else if (packet.find("BROADCAST:") == 0) {
-            std::string encryptedStr = packet.substr(10);
+        if (packet.find("MSGALL:") == 0) {
+            size_t firstColon = packet.find(':', 7);
+            if (firstColon == std::string::npos) continue;
+
+            std::string sender = packet.substr(7, firstColon - 7);
+            std::string encryptedStr = packet.substr(firstColon + 1);
+
             std::vector<unsigned long long> encrypted = parse_numbers(encryptedStr);
             std::string decrypted = decrypt_string(encrypted, d, n);
-            Log("Broadcast: " + decrypted);
+            Log(sender + " (all): " + decrypted);
+        } else if (packet.find("LIST:") == 0) {
+            std::cout << packet.substr(5) << std::endl;
         } else {
             std::vector<unsigned long long> encrypted = parse_numbers(packet);
             std::string decrypted = decrypt_string(encrypted, d, n);
@@ -177,10 +183,8 @@ int main() {
 
         while (true) {
             if (ConnectToServer(io, socket)) {
-                // Отправляем имя
                 SendPacket(socket, "USERNAME:" + username);
 
-                // Отправляем публичный ключ
                 std::string publicKey = "PUBKEY:" + std::to_string(e) + "," + std::to_string(n);
                 SendPacket(socket, publicKey);
 
@@ -193,7 +197,9 @@ int main() {
                     std::cout << "> ";
                     std::getline(std::cin, inputLine);
 
-                    if (inputLine.find("/whisp ") == 0) {
+                    if (inputLine.length() != 0)
+                    {
+                        if (inputLine.find("/whisp ") == 0) {
                         size_t firstSpace = inputLine.find(' ', 7);
                         if (firstSpace == std::string::npos) continue;
 
@@ -216,26 +222,32 @@ int main() {
                         std::string encryptedStr = vector_to_string(encrypted);
                         SendPacket(socket, "MSG:" + target + ":" + encryptedStr);
 
-                    } else if (inputLine.find("/broadcast ") == 0) {
-                        std::string message = inputLine.substr(11);
+                        } else if (inputLine.find("/all ") == 0) {
+                            std::string message = inputLine.substr(5);
 
-                        std::vector<unsigned long long> encrypted = encrypt_string(message, e, n);
-                        std::string encryptedStr = vector_to_string(encrypted);
-                        SendPacket(socket, "BROADCAST:" + encryptedStr);
+                            std::vector<unsigned long long> encrypted = encrypt_string(message, e, n);
+                            std::string encryptedStr = vector_to_string(encrypted);
+                            SendPacket(socket, "MSGALL:" + username + ":" + encryptedStr);
 
-                    } else if (inputLine == "/help") {
-                        showHelp();
+                        } else if (inputLine == "/list") {
+                            SendPacket(socket, "LIST:");
+                            continue;
 
-                    } else if (inputLine == "/list") {
-                        SendPacket(socket, "LIST:");
+                        } else if (inputLine == "/help") {
+                            showHelp();
+                            continue;
 
-                    } else if (inputLine == "/exit") {
-                        socket.close();
-                        break;
+                        } else if (inputLine == "/exit") {
+                            socket.close();
+                            break;
 
-                    } else {
-                        std::cout << "Unknown command. Use /help for available commands." << std::endl;
-                    }
+                        } else {
+                            // По умолчанию отправляем всем
+                            std::vector<unsigned long long> encrypted = encrypt_string(inputLine, e, n);
+                            std::string encryptedStr = vector_to_string(encrypted);
+                            SendPacket(socket, "MSGALL:" + username + ":" + encryptedStr);
+                        }
+                    }  
                 }
             } else {
                 std::this_thread::sleep_for(std::chrono::seconds(5));
