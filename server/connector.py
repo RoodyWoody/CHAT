@@ -76,10 +76,10 @@ if __name__ == "__main__":
     if connection:
         # create_table(connection)
 
-        insert_user(connection, "Alice", "alice@example.com")
-        insert_user(connection, "Bob", "bob@example.com")
+        # insert_user(connection, "Alice")
+        # insert_user(connection, "Bob")
 
-        select_users(connection)
+        # select_users(connection)
 
         connection.close()
         print("Соединение с PostgreSQL закрыто")
