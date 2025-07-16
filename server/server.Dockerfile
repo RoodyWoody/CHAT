@@ -10,4 +10,6 @@ RUN g++ -std=c++17 Server_Boost.cpp -o server \
     -lboost_system -lpthread
     #-lboost_system -lboost_filesystem -lboost_thread -lpthread
 
+RUN apt-get install libpq-dev psycopg2
+
 CMD ["./server"]
