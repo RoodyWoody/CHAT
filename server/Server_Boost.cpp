@@ -41,23 +41,37 @@ void LogError(const std::string& message) {
 // UDP-ответчик (обнаружение сервера)
 // -------------------------------
 
+std::string GetServerIP(boost::asio::io_context& io) {
+    try {
+        boost::asio::ip::tcp::resolver resolver(io);
+        auto endpoints = resolver.resolve(boost::asio::ip::host_name(), "");
+        for (auto& ep : endpoints) {
+            boost::asio::ip::address addr = ep.endpoint().address();
+            if (addr.is_v4() && !addr.is_loopback()) {
+                return addr.to_string(); // Например: 192.168.1.100
+            }
+        }
+    } catch (...) {
+        return "192.168.1.100"; // Укажите реальный IP сервера
+    }
+    return "127.0.0.1"; // Резервный вариант
+}
 void BroadcastResponder(boost::asio::io_context& io) {
     try {
         boost::asio::ip::udp::socket socket(io, boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v4(), 50000));
         socket.set_option(boost::asio::socket_base::broadcast(true));
         boost::array<char, 128> recv_buf;
         boost::asio::ip::udp::endpoint remote_endpoint;
-
+        std::string server_ip = GetServerIP(io); // Получаем реальный IP
         Log("UDP responder started on port 50000");
+        Log("Server IP: " + server_ip);
 
         while (true) {
             socket.receive_from(boost::asio::buffer(recv_buf), remote_endpoint);
             std::string request(recv_buf.data(), recv_buf.size());
             if (request.find("DISCOVER") == 0) {
-                std::string local_ip = socket.local_endpoint().address().to_string();
-                Log("Received DISCOVER from " + remote_endpoint.address().to_string());
-                socket.send_to(boost::asio::buffer("IP:" + local_ip), remote_endpoint);
-                Log("Sent IP: " + local_ip);
+                Log("Received DISCOVER from: " + remote_endpoint.address().to_string());
+                socket.send_to(boost::asio::buffer("IP:" + server_ip), remote_endpoint);
             }
         }
     } catch (const std::exception& ex) {
@@ -202,6 +216,7 @@ void HandleClient(Client* client) {
 
         while (true) {
             std::string packet;
+            std::cout << packet << "\n";
             if (!ReceivePacket(client->socket, packet)) {
                 Log(client->username + " disconnected.");
                 {
