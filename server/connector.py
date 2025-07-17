@@ -49,7 +49,7 @@ def insert_user(conn, socket, username, password):
         with conn.cursor() as cur:
             cur.execute(
                 sql.SQL(
-                    "INSERT INTO users (socket, username, password) VALUES (%s, %s)"
+                    "INSERT INTO users (socket, username, password) VALUES (%s, %s, %s)"
                 ),
                 (socket, username, password),
             )
@@ -76,10 +76,9 @@ if __name__ == "__main__":
     if connection:
         # create_table(connection)
 
-        # insert_user(connection, "Alice")
-        # insert_user(connection, "Bob")
+        insert_user(connection, "192.168.1.1", "Alice", "12345")
 
-        # select_users(connection)
+        select_users(connection)
 
         connection.close()
         print("Соединение с PostgreSQL закрыто")

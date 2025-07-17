@@ -8,11 +8,11 @@ services:
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: admin
       POSTGRES_DB: postgres_db
-      PGDATA: /var/lib/postgresql/data/pgdata
+      PGDATA: /var/lib/postgresql/data
     ports:
       - "5430:5432"
     volumes:
-      - ./pgdata:/var/lib/postgresql/data/pgdata
+      - ./pgdata:/var/lib/postgresql/data
       - ./initdb:/docker-entrypoint-initdb.d
       - ./postgres:/data
       - ./backups:/backups
@@ -38,10 +38,8 @@ services:
       context: ./server
       dockerfile: server.Dockerfile
     depends_on:
-      postgres:
-        condition: service_started
-      boost:
-        condition: service_started
+      - postgres
+      - boost
     ports:
       - "12340:12345" 
     volumes:
